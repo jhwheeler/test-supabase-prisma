@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import { PrismaClient } from "@prisma/client";
+import { db } from "./drizzle";
+import { sql } from "drizzle-orm";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_KEY = process.env.SUPABASE_KEY!;
@@ -43,7 +45,13 @@ async function runPosts(
     });
     return rows.length;
   });
-  return [supabaseResult, prismaResult] as const;
+  const drizzleResult = await time("drizzle.select posts", async () => {
+    const rows = await db.execute(
+      sql`select id, user_id, created_at, is_deleted from posts order by created_at desc limit ${LIMIT}`
+    );
+    return (rows as unknown[]).length;
+  });
+  return [supabaseResult, prismaResult, drizzleResult] as const;
 }
 
 async function runPostComments(
@@ -67,7 +75,13 @@ async function runPostComments(
     });
     return rows.length;
   });
-  return [supabaseComplex, prismaComplex] as const;
+  const drizzleComplex = await time("drizzle.post_comments", async () => {
+    const rows = await db.execute(
+      sql`select id, post_id, user_id, created_at from post_comments order by created_at desc limit ${LIMIT}`
+    );
+    return (rows as unknown[]).length;
+  });
+  return [supabaseComplex, prismaComplex, drizzleComplex] as const;
 }
 
 async function runInstructors(
@@ -134,27 +148,36 @@ async function runInstructors(
       return data?.length ?? 0;
     }
   );
-  return [supabaseResult, prismaResult] as const;
+  const drizzleFlat = await time("drizzle.instructors (flat)", async () => {
+    const rows = await db.execute(
+      sql`select id, first_name, last_name, honorific, slug, title, bio, short_bio, trailer_url, is_published, user_id from instructors order by created_at desc limit ${LIMIT}`
+    );
+    return (rows as unknown[]).length;
+  });
+  return [supabaseResult, prismaResult, drizzleFlat] as const;
 }
 
 async function main() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
   const prisma = new PrismaClient();
   const rows: Array<{ label: string; ms: number; rows: number }> = [];
-  const [postsS, postsP] = await runPosts(supabase, prisma);
+  const [postsS, postsP, postsD] = await runPosts(supabase, prisma);
   rows.push(
     { label: postsS.label, ms: Math.round(postsS.ms), rows: postsS.value },
-    { label: postsP.label, ms: Math.round(postsP.ms), rows: postsP.value }
+    { label: postsP.label, ms: Math.round(postsP.ms), rows: postsP.value },
+    { label: postsD.label, ms: Math.round(postsD.ms), rows: postsD.value }
   );
-  const [pcS, pcP] = await runPostComments(supabase, prisma);
+  const [pcS, pcP, pcD] = await runPostComments(supabase, prisma);
   rows.push(
     { label: pcS.label, ms: Math.round(pcS.ms), rows: pcS.value },
-    { label: pcP.label, ms: Math.round(pcP.ms), rows: pcP.value }
+    { label: pcP.label, ms: Math.round(pcP.ms), rows: pcP.value },
+    { label: pcD.label, ms: Math.round(pcD.ms), rows: pcD.value }
   );
-  const [instS, instP] = await runInstructors(supabase, prisma);
+  const [instS, instP, instD] = await runInstructors(supabase, prisma);
   rows.push(
     { label: instS.label, ms: Math.round(instS.ms), rows: instS.value },
-    { label: instP.label, ms: Math.round(instP.ms), rows: instP.value }
+    { label: instP.label, ms: Math.round(instP.ms), rows: instP.value },
+    { label: instD.label, ms: Math.round(instD.ms), rows: instD.value }
   );
   console.table(rows);
   await prisma.$disconnect();
