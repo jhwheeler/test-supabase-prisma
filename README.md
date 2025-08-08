@@ -2,9 +2,7 @@ Minimal Supabase vs Prisma benchmark
 
 Setup
 
-- Copy `env.example` to `.env` and fill:
-  - `SUPABASE_URL`, `SUPABASE_KEY` for the REST client
-  - `SUPABASE_DB_CONNECTION_STRING`, `SUPABASE_DB_DIRECT_URL` for Prisma (same variables used in `web_v2/prisma/schema.prisma`)
+- Get `.env` from the `web` project
 - Install deps: `pnpm i` or `npm i`
 - Generate Prisma client: `pnpm prisma:generate`
 
@@ -15,4 +13,4 @@ Run
 
 Notes
 
-- This reads from existing tables (`posts`, `post_comments`) to compare Supabase SDK vs Prisma `.findMany()`.
+- This reads from existing tables (`posts`, `post_comments`, `instructors`) to compare Supabase SDK vs Prisma `.findMany()`.
