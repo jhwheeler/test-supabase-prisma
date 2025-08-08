@@ -1,0 +1,25 @@
+{
+  "name": "test-supabase-prisma",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "tsx src/bench.ts",
+    "bench:instructors": "tsx src/test_instructors.ts",
+    "prisma:pull": "prisma db pull",
+    "prisma:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "6.9.0",
+    "@supabase/supabase-js": "^2.46.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "prisma": "6.9.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
