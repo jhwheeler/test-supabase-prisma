@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient as PrismaClientEdge } from "@prisma/client/edge";
+import { PrismaClient as PrismaClientNode } from "./generated/prisma-direct";
+import { withAccelerate } from "@prisma/extension-accelerate";
 import { db } from "./drizzle";
 import { sql } from "drizzle-orm";
 import crypto from "node:crypto";
@@ -8,6 +10,9 @@ import crypto from "node:crypto";
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_KEY = process.env.SUPABASE_KEY!;
 const LIMIT = Number(process.env.BENCH_LIMIT ?? 100);
+const CACHE_TTL = Number(process.env.PRISMA_CACHE_TTL ?? 60);
+const REPEAT_READS = Number(process.env.BENCH_REPEAT ?? 3);
+const REPEAT_WRITES = Number(process.env.BENCH_WRITE_REPEAT ?? 1);
 
 function hrtimeMs(): number {
   const [sec, ns] = process.hrtime();
@@ -26,7 +31,8 @@ async function time<T>(
 
 async function runPosts(
   supabase: ReturnType<typeof createClient>,
-  prisma: PrismaClient
+  prismaAccel: PrismaClientEdge,
+  prismaDirect: PrismaClientNode
 ) {
   const table = "posts";
   const supabaseResult = await time("supabase.select posts", async () => {
@@ -38,26 +44,47 @@ async function runPosts(
     if (error) throw error;
     return data?.length ?? 0;
   });
-  const prismaResult = await time("prisma.findMany posts", async () => {
-    const rows = await prisma.posts.findMany({
-      select: { id: true, user_id: true, created_at: true, is_deleted: true },
-      orderBy: { created_at: "desc" },
-      take: LIMIT,
-    });
-    return rows.length;
-  });
+  const prismaAccelResult = await time(
+    "prisma.accel findMany posts",
+    async () => {
+      const rows = await prismaAccel.posts.findMany({
+        select: { id: true, user_id: true, created_at: true, is_deleted: true },
+        orderBy: { created_at: "desc" },
+        take: LIMIT,
+        cacheStrategy: { ttl: CACHE_TTL },
+      });
+      return rows.length;
+    }
+  );
+  const prismaDirectResult = await time(
+    "prisma.direct findMany posts",
+    async () => {
+      const rows = await prismaDirect.posts.findMany({
+        select: { id: true, user_id: true, created_at: true, is_deleted: true },
+        orderBy: { created_at: "desc" },
+        take: LIMIT,
+      });
+      return rows.length;
+    }
+  );
   const drizzleResult = await time("drizzle.select posts", async () => {
     const rows = await db.execute(
       sql`select id, user_id, created_at, is_deleted from posts order by created_at desc limit ${LIMIT}`
     );
     return (rows as unknown[]).length;
   });
-  return [supabaseResult, prismaResult, drizzleResult] as const;
+  return [
+    supabaseResult,
+    prismaAccelResult,
+    prismaDirectResult,
+    drizzleResult,
+  ] as const;
 }
 
 async function runPostComments(
   supabase: ReturnType<typeof createClient>,
-  prisma: PrismaClient
+  prismaAccel: PrismaClientEdge,
+  prismaDirect: PrismaClientNode
 ) {
   const supabaseComplex = await time("supabase.post_comments", async () => {
     const { data, error } = await supabase
@@ -68,26 +95,47 @@ async function runPostComments(
     if (error) throw error;
     return data?.length ?? 0;
   });
-  const prismaComplex = await time("prisma.post_comments", async () => {
-    const rows = await prisma.post_comments.findMany({
-      select: { id: true, post_id: true, user_id: true, created_at: true },
-      orderBy: { created_at: "desc" },
-      take: LIMIT,
-    });
-    return rows.length;
-  });
+  const prismaAccelComplex = await time(
+    "prisma.accel post_comments",
+    async () => {
+      const rows = await prismaAccel.post_comments.findMany({
+        select: { id: true, post_id: true, user_id: true, created_at: true },
+        orderBy: { created_at: "desc" },
+        take: LIMIT,
+        cacheStrategy: { ttl: CACHE_TTL },
+      });
+      return rows.length;
+    }
+  );
+  const prismaDirectComplex = await time(
+    "prisma.direct post_comments",
+    async () => {
+      const rows = await prismaDirect.post_comments.findMany({
+        select: { id: true, post_id: true, user_id: true, created_at: true },
+        orderBy: { created_at: "desc" },
+        take: LIMIT,
+      });
+      return rows.length;
+    }
+  );
   const drizzleComplex = await time("drizzle.post_comments", async () => {
     const rows = await db.execute(
       sql`select id, post_id, user_id, created_at from post_comments order by created_at desc limit ${LIMIT}`
     );
     return (rows as unknown[]).length;
   });
-  return [supabaseComplex, prismaComplex, drizzleComplex] as const;
+  return [
+    supabaseComplex,
+    prismaAccelComplex,
+    prismaDirectComplex,
+    drizzleComplex,
+  ] as const;
 }
 
 async function runInstructors(
   supabase: ReturnType<typeof createClient>,
-  prisma: PrismaClient
+  prismaAccel: PrismaClientEdge,
+  prismaDirect: PrismaClientNode
 ) {
   const selectShape = {
     id: true,
@@ -119,10 +167,22 @@ async function runInstructors(
     },
     featured_instructors: { select: { order: true } },
   } as const;
-  const prismaResult = await time(
-    "prisma.instructors (app-select)",
+  const prismaAccelResult = await time(
+    "prisma.accel instructors (app-select)",
     async () => {
-      const rows = await prisma.instructors.findMany({
+      const rows = await prismaAccel.instructors.findMany({
+        select: selectShape,
+        orderBy: [{ created_at: "desc" }],
+        take: LIMIT,
+        cacheStrategy: { ttl: CACHE_TTL },
+      });
+      return rows.length;
+    }
+  );
+  const prismaDirectResult = await time(
+    "prisma.direct instructors (app-select)",
+    async () => {
+      const rows = await prismaDirect.instructors.findMany({
         select: selectShape,
         orderBy: [{ created_at: "desc" }],
         take: LIMIT,
@@ -155,7 +215,12 @@ async function runInstructors(
     );
     return (rows as unknown[]).length;
   });
-  return [supabaseResult, prismaResult, drizzleFlat] as const;
+  return [
+    supabaseResult,
+    prismaAccelResult,
+    prismaDirectResult,
+    drizzleFlat,
+  ] as const;
 }
 
 function uniqueSuffix(): string {
@@ -169,7 +234,7 @@ type CreatedIds = {
 };
 
 async function cleanupCreated(
-  prisma: PrismaClient,
+  prisma: PrismaClientEdge | PrismaClientNode,
   ids: CreatedIds
 ): Promise<void> {
   const { instructorId, keywordIds, bookIds } = ids;
@@ -195,7 +260,7 @@ async function cleanupCreated(
 
 async function runCreateInstructorSupabase(
   supabase: ReturnType<typeof createClient>,
-  prisma: PrismaClient
+  prisma: PrismaClientEdge | PrismaClientNode
 ): Promise<{ label: string; ms: number; value: number }> {
   const suffix = uniqueSuffix();
   const firestoreId = `bench_${crypto.randomUUID?.() ?? suffix}`;
@@ -268,7 +333,8 @@ async function runCreateInstructorSupabase(
 }
 
 async function runCreateInstructorPrismaOrm(
-  prisma: PrismaClient
+  prisma: PrismaClientEdge | PrismaClientNode,
+  label: string
 ): Promise<{ label: string; ms: number; value: number }> {
   const suffix = uniqueSuffix();
   const firestoreId = `bench_${crypto.randomUUID?.() ?? suffix}`;
@@ -278,7 +344,7 @@ async function runCreateInstructorPrismaOrm(
     { title: `Bench Book B ${suffix}`, url: `https://example.com/b-${suffix}` },
   ];
   let ids: CreatedIds = { instructorId: 0, keywordIds: [], bookIds: [] };
-  const t = await time("prisma.create instructor (ORM tx)", async () => {
+  const t = await time(label, async () => {
     await prisma.$transaction(async (tx) => {
       await tx.keywords.createMany({
         data: keywordNames.map((name) => ({ name })),
@@ -342,11 +408,12 @@ async function runCreateInstructorPrismaOrm(
 }
 
 async function runCreateInstructorPrismaRaw(
-  prisma: PrismaClient
+  prisma: PrismaClientEdge | PrismaClientNode,
+  label: string
 ): Promise<{ label: string; ms: number; value: number }> {
   const suffix = uniqueSuffix();
   const firestoreId = `bench_${crypto.randomUUID?.() ?? suffix}`;
-  return time("prisma.create instructor (RAW tx)", async () => {
+  return time(label, async () => {
     let ids: CreatedIds = { instructorId: 0, keywordIds: [], bookIds: [] };
     try {
       await prisma.$transaction(async (tx) => {
@@ -400,7 +467,9 @@ async function runCreateInstructorPrismaRaw(
   });
 }
 
-async function runCreateInstructorDrizzleTx(): Promise<{
+async function runCreateInstructorDrizzleTx(
+  prismaForCleanup: PrismaClientEdge | PrismaClientNode
+): Promise<{
   label: string;
   ms: number;
   value: number;
@@ -453,51 +522,161 @@ async function runCreateInstructorDrizzleTx(): Promise<{
     });
 
     // Cleanup using Prisma outside timing
-    await cleanupCreated(new PrismaClient(), ids);
+    await cleanupCreated(prismaForCleanup, ids);
     return 1;
   });
 }
 
 async function main() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-  const prisma = new PrismaClient();
+  const accelUrl =
+    process.env.PRISMA_ACCELERATE_URL ??
+    process.env.SUPABASE_DB_CONNECTION_STRING!;
+  const prismaAccel = new PrismaClientEdge({
+    datasources: { db: { url: accelUrl } },
+  }).$extends(withAccelerate());
+  const prismaDirect = new PrismaClientNode();
   const rows: Array<{ label: string; ms: number; rows: number }> = [];
-  const [postsS, postsP, postsD] = await runPosts(supabase, prisma);
-  rows.push(
-    { label: postsS.label, ms: Math.round(postsS.ms), rows: postsS.value },
-    { label: postsP.label, ms: Math.round(postsP.ms), rows: postsP.value },
-    { label: postsD.label, ms: Math.round(postsD.ms), rows: postsD.value }
-  );
-  const [pcS, pcP, pcD] = await runPostComments(supabase, prisma);
-  rows.push(
-    { label: pcS.label, ms: Math.round(pcS.ms), rows: pcS.value },
-    { label: pcP.label, ms: Math.round(pcP.ms), rows: pcP.value },
-    { label: pcD.label, ms: Math.round(pcD.ms), rows: pcD.value }
-  );
-  const [instS, instP, instD] = await runInstructors(supabase, prisma);
-  rows.push(
-    { label: instS.label, ms: Math.round(instS.ms), rows: instS.value },
-    { label: instP.label, ms: Math.round(instP.ms), rows: instP.value },
-    { label: instD.label, ms: Math.round(instD.ms), rows: instD.value }
-  );
+  for (let hit = 1; hit <= REPEAT_READS; hit++) {
+    const [postsS, postsPA, postsPD, postsD] = await runPosts(
+      supabase,
+      prismaAccel,
+      prismaDirect
+    );
+    rows.push(
+      {
+        label: `${postsS.label} (hit ${hit})`,
+        ms: Math.round(postsS.ms),
+        rows: postsS.value,
+      },
+      {
+        label: `${postsPA.label} (hit ${hit})`,
+        ms: Math.round(postsPA.ms),
+        rows: postsPA.value,
+      },
+      {
+        label: `${postsPD.label} (hit ${hit})`,
+        ms: Math.round(postsPD.ms),
+        rows: postsPD.value,
+      },
+      {
+        label: `${postsD.label} (hit ${hit})`,
+        ms: Math.round(postsD.ms),
+        rows: postsD.value,
+      }
+    );
+    const [pcS, pcPA, pcPD, pcD] = await runPostComments(
+      supabase,
+      prismaAccel,
+      prismaDirect
+    );
+    rows.push(
+      {
+        label: `${pcS.label} (hit ${hit})`,
+        ms: Math.round(pcS.ms),
+        rows: pcS.value,
+      },
+      {
+        label: `${pcPA.label} (hit ${hit})`,
+        ms: Math.round(pcPA.ms),
+        rows: pcPA.value,
+      },
+      {
+        label: `${pcPD.label} (hit ${hit})`,
+        ms: Math.round(pcPD.ms),
+        rows: pcPD.value,
+      },
+      {
+        label: `${pcD.label} (hit ${hit})`,
+        ms: Math.round(pcD.ms),
+        rows: pcD.value,
+      }
+    );
+    const [instS, instPA, instPD, instD] = await runInstructors(
+      supabase,
+      prismaAccel,
+      prismaDirect
+    );
+    rows.push(
+      {
+        label: `${instS.label} (hit ${hit})`,
+        ms: Math.round(instS.ms),
+        rows: instS.value,
+      },
+      {
+        label: `${instPA.label} (hit ${hit})`,
+        ms: Math.round(instPA.ms),
+        rows: instPA.value,
+      },
+      {
+        label: `${instPD.label} (hit ${hit})`,
+        ms: Math.round(instPD.ms),
+        rows: instPD.value,
+      },
+      {
+        label: `${instD.label} (hit ${hit})`,
+        ms: Math.round(instD.ms),
+        rows: instD.value,
+      }
+    );
+  }
 
-  // Multi-step create instructor comparisons
-  const createS = await runCreateInstructorSupabase(supabase, prisma);
-  const createP = await runCreateInstructorPrismaOrm(prisma);
-  const createPRaw = await runCreateInstructorPrismaRaw(prisma);
-  const createD = await runCreateInstructorDrizzleTx();
-  rows.push(
-    { label: createS.label, ms: Math.round(createS.ms), rows: createS.value },
-    { label: createP.label, ms: Math.round(createP.ms), rows: createP.value },
-    {
-      label: createPRaw.label,
-      ms: Math.round(createPRaw.ms),
-      rows: createPRaw.value,
-    },
-    { label: createD.label, ms: Math.round(createD.ms), rows: createD.value }
-  );
+  // Multi-hit create instructor comparisons (sequential)
+  for (let hit = 1; hit <= REPEAT_WRITES; hit++) {
+    const createS = await runCreateInstructorSupabase(supabase, prismaAccel);
+    const createPA = await runCreateInstructorPrismaOrm(
+      prismaAccel,
+      "prisma.accel create instructor (ORM tx)"
+    );
+    const createPD = await runCreateInstructorPrismaOrm(
+      prismaDirect,
+      "prisma.direct create instructor (ORM tx)"
+    );
+    const createPRawA = await runCreateInstructorPrismaRaw(
+      prismaAccel,
+      "prisma.accel create instructor (RAW tx)"
+    );
+    const createPRawD = await runCreateInstructorPrismaRaw(
+      prismaDirect,
+      "prisma.direct create instructor (RAW tx)"
+    );
+    const createD = await runCreateInstructorDrizzleTx();
+    rows.push(
+      {
+        label: `${createS.label} (hit ${hit})`,
+        ms: Math.round(createS.ms),
+        rows: createS.value,
+      },
+      {
+        label: `${createPA.label} (hit ${hit})`,
+        ms: Math.round(createPA.ms),
+        rows: createPA.value,
+      },
+      {
+        label: `${createPD.label} (hit ${hit})`,
+        ms: Math.round(createPD.ms),
+        rows: createPD.value,
+      },
+      {
+        label: `${createPRawA.label} (hit ${hit})`,
+        ms: Math.round(createPRawA.ms),
+        rows: createPRawA.value,
+      },
+      {
+        label: `${createPRawD.label} (hit ${hit})`,
+        ms: Math.round(createPRawD.ms),
+        rows: createPRawD.value,
+      },
+      {
+        label: `${createD.label} (hit ${hit})`,
+        ms: Math.round(createD.ms),
+        rows: createD.value,
+      }
+    );
+  }
   console.table(rows);
-  await prisma.$disconnect();
+  await prismaAccel.$disconnect();
+  await prismaDirect.$disconnect();
 }
 
 main().catch((err) => {

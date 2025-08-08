@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
+  // Using Accelerate URL stored in SUPABASE_DB_CONNECTION_STRING (prisma://...)
   url       = env("SUPABASE_DB_CONNECTION_STRING")
   directUrl = env("SUPABASE_DB_DIRECT_URL")
 }

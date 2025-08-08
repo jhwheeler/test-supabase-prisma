@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma-direct"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("SUPABASE_DB_DIRECT_URL")
+}
+
+// Reuse the same models by importing from the main schema is not supported,
+// so we duplicate by referencing the existing file isn't possible. We copy the models here.
+// For simplicity and to avoid drift, we only need the models used in bench: posts, post_comments, instructors,
+// instructor_books, instructor_keywords, books, keywords, featured_instructors, instructor_social_links.
+
+model posts {
+  id                   BigInt   @id @default(autoincrement())
+  user_id              String   @db.VarChar
+  text                 String?
+  has_image            Boolean  @default(false)
+  aspect_ratio         Float?   @db.Real
+  translation_x        Float?   @db.Real
+  zoom                 Float?   @db.Real
+  poll_id              BigInt?
+  original_post_id     BigInt?
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+  last_modified        DateTime @default(now()) @db.Timestamptz(6)
+  translation_y        Float?   @db.Real
+  is_deleted           Boolean  @default(false)
+  lecture_comment_id   BigInt?  @unique(map: "unique_lecture_comment_id")
+  embedding_created_at DateTime?              @db.Timestamptz(6)
+  embedding_error      String?
+  embedding_status     String?                @default("pending")
+  post_comments        post_comments[]
+
+  @@index([created_at])
+}
+
+model post_comments {
+  id          BigInt   @id @default(autoincrement())
+  text        String
+  post_id     BigInt
+  user_id     String   @db.VarChar
+  thread_id   BigInt?
+  reply_to_id BigInt?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  last_modified DateTime @default(now()) @db.Timestamptz(6)
+  posts       posts    @relation(fields: [post_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([created_at])
+  @@index([post_id])
+}
+
+model instructors {
+  id                      Int                      @id @default(autoincrement())
+  first_name              String
+  last_name               String
+  honorific               String?
+  slug                    String                   @unique
+  title                   String
+  bio                     String
+  short_bio               String
+  trailer_url             String
+  is_published            Boolean
+  user_id                 String?                  @db.VarChar
+  created_at              DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?                @default(now()) @db.Timestamptz(6)
+  firestore_id            String                   @unique
+  instructor_books        instructor_books[]
+  instructor_keywords     instructor_keywords[]
+  instructor_social_links instructor_social_links?
+  featured_instructors    featured_instructors?
+}
+
+model instructor_books {
+  id            Int         @id @default(autoincrement())
+  instructor_id Int
+  book_id       Int
+  books         books       @relation(fields: [book_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  instructors   instructors @relation(fields: [instructor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([instructor_id, book_id], map: "instructor_books_unique_index")
+}
+
+model instructor_keywords {
+  id            Int         @id @default(autoincrement())
+  instructor_id Int
+  keyword_id    Int
+  order         Int         @db.SmallInt
+  instructors   instructors @relation(fields: [instructor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  keywords      keywords    @relation(fields: [keyword_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([instructor_id, keyword_id], map: "instructor_keywords_unique_index")
+  @@unique([instructor_id, order], map: "instructor_keywords_unique_instructor_order")
+}
+
+model instructor_social_links {
+  id            Int         @id(map: "social_links_pkey") @default(autoincrement())
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  facebook      String?
+  twitter       String?
+  instagram     String?
+  youtube       String?
+  tiktok        String?
+  website       String?
+  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
+  instructor_id Int         @unique
+  instructors   instructors @relation(fields: [instructor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model books {
+  id               Int                @id @default(autoincrement())
+  title            String
+  url              String
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  instructor_books instructor_books[]
+}
+
+model keywords {
+  id         Int      @id @default(autoincrement())
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  key        String   @unique(map: "keywords_unique_key_column") @default(dbgenerated("lower(name)"))
+  instructor_keywords instructor_keywords[]
+}
+
+model featured_instructors {
+  id            BigInt      @id @default(autoincrement())
+  instructor_id Int         @unique
+  order         Int         @unique @db.SmallInt
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
+  instructors   instructors @relation(fields: [instructor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+
