@@ -1,0 +1,55 @@
+name: DB Bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      bench_limit:
+        description: Rows limit for SELECT benches
+        required: false
+        default: "100"
+
+jobs:
+  run-bench:
+    # For in-region: change to `runs-on: [self-hosted, linux, supabase-region]` and point a runner in the DB region
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: test-supabase-prisma
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install deps
+        run: pnpm i
+
+      - name: Generate Prisma client
+        run: pnpm prisma:generate
+        env:
+          SUPABASE_DB_CONNECTION_STRING: ${{ secrets.SUPABASE_DB_CONNECTION_STRING }}
+          SUPABASE_DB_DIRECT_URL: ${{ secrets.SUPABASE_DB_DIRECT_URL }}
+
+      - name: Run bench
+        run: pnpm bench | tee bench-output.txt
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_DB_CONNECTION_STRING: ${{ secrets.SUPABASE_DB_CONNECTION_STRING }}
+          SUPABASE_DB_DIRECT_URL: ${{ secrets.SUPABASE_DB_DIRECT_URL }}
+          BENCH_LIMIT: ${{ inputs.bench_limit }}
+          PRISMA_CLIENT_ENGINE_TYPE: library
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output
+          path: test-supabase-prisma/bench-output.txt
