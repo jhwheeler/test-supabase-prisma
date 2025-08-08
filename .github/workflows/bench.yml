@@ -12,9 +12,6 @@ jobs:
   run-bench:
     # For in-region: change to `runs-on: [self-hosted, linux, supabase-region]` and point a runner in the DB region
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: test-supabase-prisma
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-output
-          path: test-supabase-prisma/bench-output.txt
+          path: bench-output.txt
