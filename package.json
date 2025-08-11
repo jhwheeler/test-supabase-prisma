@@ -7,7 +7,8 @@
     "bench": "tsx src/bench.ts",
     "bench:instructors": "tsx src/test_instructors.ts",
     "prisma:pull": "prisma db pull",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "prisma:generate:all": "prisma generate --no-engine && prisma generate --schema prisma/schema.direct.prisma"
   },
   "dependencies": {
     "@prisma/client": "^6.13.0",
